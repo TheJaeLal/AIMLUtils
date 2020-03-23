@@ -1,7 +1,7 @@
-/*
-* Author: Jay Lal
-* Common Utility functions/operations used in Computer Vision/Image Processing
-*/
+"""
+    Author: Jay Lal
+    Common Utility functions/operations used in Computer Vision/Image Processing
+"""
 
 import cv2
 
