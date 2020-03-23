@@ -1,6 +1,7 @@
 """
     Author: Jay Lal
     Common Utility functions/operations used in Computer Vision/Image Processing
+    Dependencies: Python3, OpenCV>=3.4, Scikit-image>=0.14
 """
 
 import cv2
