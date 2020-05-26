@@ -1,7 +1,7 @@
 """
     Author: Jay Lal
     Common Utility functions/operations used in Computer Vision/Image Processing
-    Dependencies: Python3, OpenCV>=3.4, Scikit-image>=0.14
+    Dependencies: Python3, OpenCV>=3.4, Scikit-image>=0.15
 """
 
 import cv2
@@ -9,6 +9,7 @@ import cv2
 from skimage.morphology import skeletonize as skel_zhang
 from skimage.morphology import skeletonize_3d as skel_lee
 from skimage.filters import threshold_sauvola, threshold_niblack, unsharp_mask
+from skimage.measure import compare_psnr, compare_ssim
 from skimage import transform as tf
 
 import numpy as np
@@ -18,6 +19,50 @@ from pathlib import Path
 
 import os
 import subprocess
+
+
+# TODO: Create a resize function with dynamic interpolation (based on wether upscaling / downscaling is required
+# Choose the best interpolation method, that is also the fastest (BICUBIC or AREA or LINEAR or whatever)
+
+# glob pattern for fetching jpeg and png images
+glob_img = "*[.png|.PNG][.jpg|.JPG]"
+
+
+def _get_interpolation(inter_string):
+    
+    # In case it's already an interpolation code..
+    if isinstance(inter_string, int):
+        return inter_string
+    
+    inter_string = inter_string.lower().strip()
+    inter_methods = {'area':cv2.INTER_AREA,
+                     'linear':cv2.INTER_LINEAR,
+                     'cubic':cv2.INTER_CUBIC,
+                     'nearest':cv2.INTER_NEAREST}
+    
+    if inter_string not in inter_methods:
+        raise Exception("Unknown Interpolation Method: '{}'".format(inter_string))
+    
+    return inter_methods[inter_string]
+
+
+def rotate(image, angle, center = None, scale = 1.0):
+    (h, w) = image.shape[:2]
+
+    if center is None:
+        center = (w // 2, h // 2)
+
+    # Perform the rotation
+    M = cv2.getRotationMatrix2D(center, angle, scale)
+    rotated = cv2.warpAffine(image, M, (w, h),
+                             borderMode=cv2.BORDER_CONSTANT,
+                             borderValue=[255, 255, 255],
+                            flags=cv2.INTER_CUBIC)
+    
+#     rotated = scipy.ndimage.rotate(image, angle, reshape=False, cval=255)
+
+    return rotated
+
 
 def deskew_imgmagick(input_image):
     """
@@ -38,8 +83,99 @@ def deskew_imgmagick(input_image):
     return skew_image
 
 
+def ImageGenerator(img_collection, color='gray', target_size=None,
+                   resize_max_h=None, resize_max_w=None,
+                   preserve_ratio=False, inter='area'):
+    """
+        TODO: Can I make this ImageGenerator Fast / Make use of multithreading - for batches??
+    """
+    
+    # If a directory is passed:
+    if isinstance(img_collection, str) or not hasattr(img_collection, '__iter__'):
+        img_collection = Path(img_collection).glob(glob_img)
+    
+    for img_path in img_collection:
+        img = read_img(img_path, color)
+        
+        if target_size is not None:
+
+            # Get the OpenCV interpolation code
+            inter = _get_interpolation(inter)
+            
+            if isinstance(target_size, (int, float)):
+                if preserve_ratio:
+                    img = resize_padd_square(img, target_size, inter)
+                else:
+                    img = cv2.resize(img, (target_size, target_size), inter)
+            
+            # Target size is a tuple/list
+            else:
+                target_h, target_w = target_size
+                if preserve_ratio:
+                    raise NotImplementedError("Currently only square(same target height & width)\
+resize and padd is supported to preserve aspect ratio")
+                else:
+                    img = cv2.resize(img, (target_h, target_w), inter)
+            
+        elif resize_max_w is not None or resize_max_h is not None:
+
+            if resize_max_h and img.shape[0] > resize_max_h:
+                img = resize(img, height=resize_max_h)
+                
+            if resize_max_w and img.shape[1] > resize_max_w:
+                img = resize(img, width=resize_max_w)
+            
+        yield img_path, img
+
+        
+def resize_padd_square(img, desired_size, inter='area', padd_color=255):
+    """
+        TODO: Modify this function to resize_padd to non-square images as well..
+    """
+    
+    if padd_color==255 and img.ndim == 3:
+        padd_color = [255, 255, 255]
+    
+    inter = _get_interpolation(inter)
+    
+    old_size = img.shape[:2] # old_size is in (height, width) format
+
+    ratio = float(desired_size)/max(old_size)
+    new_size = tuple([int(x*ratio) for x in old_size])
+
+    # new_size should be in (width, height) format
+    img = cv2.resize(img, (new_size[1], new_size[0]), inter)
+
+    delta_w = desired_size - new_size[1]
+    delta_h = desired_size - new_size[0]
+    top, bottom = delta_h//2, delta_h-(delta_h//2)
+    left, right = delta_w//2, delta_w-(delta_w//2)
+
+    new_img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT,
+    value=padd_color)
+
+    return new_img
+
+
+def symmetric_crop(img, h_crop_pct=0, w_crop_pct=0, copy=True):
+    h,w = img.shape[:2]
+    
+    up_pct = h_crop_pct
+    down_pct = 100 - up_pct
+    
+    left_pct = w_crop_pct
+    right_pct = 100 - left_pct
+    
+    crop = img[int(h*up_pct/100): int(h*down_pct/100), int(w*left_pct/100): int(w*right_pct/100)].copy()
+    
+    if copy:
+        crop = crop.copy()
+    
+    return crop
+    
+
 def remove_table_lines(img, hse=100, vse=40):
-    # TODO: cvutils.to_gray can be added as a decorator -> ensure_gray_img
+    # TODO: to_gray can be added as a decorator -> ensure_gray_img
     img = ~to_gray(img)
 
     # implt(img)
@@ -59,7 +195,7 @@ def remove_table_lines(img, hse=100, vse=40):
 
     table_lines_mask = cv2.add(vertical, horizontal)
     thick_lines_mask = cv2.dilate(table_lines_mask, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
-    #     thick_lines_mask = ~cvutils.sharpen(~thick_lines_mask)
+    #     thick_lines_mask = ~sharpen(~thick_lines_mask)
     # implt(thick_lines_mask)
 
     cleaned_img = cv2.add(~img, thick_lines_mask)
@@ -95,19 +231,36 @@ def sharpenOpenCV(image):
     return sharp_img
 
 
-def resize(img, height, allways=False):
-    """Depreceated, use imutils.resize"""
-    """Resize image to given height."""
-    if (img.shape[0] > height or allways):
-        rat = height / img.shape[0]
-        return cv2.resize(img, (int(rat * img.shape[1]), height))
+def resize(image, width=None, height=None, inter=cv2.INTER_AREA):
+    # (Borrowed from imutils)initialize the dimensions of the image to be resized and
+    # grab the image size
+    dim = None
+    (h, w) = image.shape[:2]
 
-    return img
+    # if both the width and height are None, then return the
+    # original image
+    if width is None and height is None:
+        return image
 
+    # check to see if the width is None
+    if width is None:
+        # calculate the ratio of the height and construct the
+        # dimensions
+        r = height / float(h)
+        dim = (int(w * r), height)
 
-def ratio(img, height=800):
-    """Getting scale ratio."""
-    return img.shape[0] / height
+    # otherwise, the height is None
+    else:
+        # calculate the ratio of the width and construct the
+        # dimensions
+        r = width / float(w)
+        dim = (width, int(h * r))
+
+    # resize the image
+    resized = cv2.resize(image, dim, interpolation=inter)
+
+    # return the resized image
+    return resized
 
 
 def img_extend(img, shape):
@@ -130,11 +283,12 @@ def to_gray(img):
 
     return img
 
-
+    
 def to_bgr(img):
     if img.ndim == 2:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 
+        
     return img
 
 
@@ -204,15 +358,24 @@ def save_img(img_path, img):
     return cv2.imwrite(str(img_path), img)
 
 
-def read_img(img_path, as_gray=True):
+def read_img(img_path, color='gray'):
     if not Path(img_path).exists():
         print("Image does not exist:", str(img_path))
         return False
-
-    if as_gray:
-        return cv2.imread(str(img_path), 0)
     
-    return cv2.imread(str(img_path))
+    img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+
+    color = color.lower().strip()
+    color_reader = {'gray': to_gray(img),
+                    'grey': to_gray(img),
+                    'rgb': cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
+                    'bgr': img}
+
+    if color not in color_reader:
+        raise Exception("Unrecognised color format:'{}',\
+        please use one of the valid_color formats:{}".format(color_reader.keys()))
+        
+    return color_reader[color]
 
 
 def draw_bbox(img, boxes, color=(0, 255, 0), thickness=1):
@@ -251,6 +414,23 @@ def draw_bbox_with_text(img, bbox_with_text, bbox_color=(0, 255, 0), text_scale 
         cv2.putText(boxed_img, text, (x1-3, y1-2), cv2.FONT_HERSHEY_SIMPLEX, text_scale, text_color, 1, cv2.LINE_AA)
 
     return boxed_img
+
+
+def get_ssim_psnr(true_img, test_img, color=False):
+    """Assuming input Images are color in BGR format (default in OpenCV)
+    """
+    
+    def _get_luminance_BGR(bgr_img):
+        return cv2.cvtColor(bgr_img, cv2.COLOR_BGR2YCrCb)[:, :, 0]
+
+    if not color:
+        true_img = _get_luminance_BGR(true_img)
+        test_img = _get_luminance_BGR(test_img)
+
+    ssim = compare_ssim(true_img, test_img, multichannel=color)
+    psnr = compare_psnr(true_img, test_img)
+    
+    return ssim, psnr
 
 
 def get_pixel_density(region):
@@ -541,7 +721,7 @@ def correct_slant(word_img):
 def viz_splits_final(img, totalSplits):
     for split in totalSplits:
         split = int(split)
-        # ratio = self.imgSize[0] / self.imgSize[1]
+        # ratio = imgSize[0] / imgSize[1]
         # split = int(split * ratio)
         cv2.line(img, (split, 0), (split, img.shape[0]), (0, 0, 255), 1)
 
@@ -555,7 +735,7 @@ def viz_splits_all(img, predictedSplits, confidence_threshold):
 
     for split in predictedSplits:
         split = int(split)
-        # ratio = self.imgSize[0] / self.imgSize[1]
+        # ratio = imgSize[0] / imgSize[1]
         # split = int(split * ratio)
         cv2.line(img, (split, 0), (split, img.shape[0]), (0, 0, 255), 1)
 
