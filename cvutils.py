@@ -10,6 +10,7 @@ from skimage.morphology import skeletonize as skel_zhang
 from skimage.morphology import skeletonize_3d as skel_lee
 from skimage.filters import threshold_sauvola, threshold_niblack, unsharp_mask
 from skimage.measure import compare_psnr, compare_ssim
+from skimage.morphology import disk
 from skimage import transform as tf
 
 import numpy as np
@@ -46,7 +47,7 @@ def _get_interpolation(inter_string):
     return inter_methods[inter_string]
 
 
-def rotate(image, angle, center = None, scale = 1.0):
+def rotate(image, angle, center = None, scale = 1.0, borderColor=255):
     (h, w) = image.shape[:2]
 
     if center is None:
@@ -56,7 +57,7 @@ def rotate(image, angle, center = None, scale = 1.0):
     M = cv2.getRotationMatrix2D(center, angle, scale)
     rotated = cv2.warpAffine(image, M, (w, h),
                              borderMode=cv2.BORDER_CONSTANT,
-                             borderValue=[255, 255, 255],
+                             borderValue=borderColor,
                             flags=cv2.INTER_CUBIC)
     
 #     rotated = scipy.ndimage.rotate(image, angle, reshape=False, cval=255)
@@ -204,6 +205,21 @@ def remove_table_lines(img, hse=100, vse=40):
     # implt(cleaned_img)
 
     return cleaned_img
+
+
+# For generating synthetic motion blur..
+def motionBlur_kernel(size, theta):
+    k = np.zeros((size, size), np.uint8)
+    k[size//2, :] = 1
+    k = rotate(k, theta, borderColor=[0,0,0]).astype(np.float32)
+    k /= k.sum()
+    return k
+
+# For generating synthetic motion blur..
+def diskBlur_kernel(radius):
+    k = disk(radius).astype(np.float32)
+    k /= k.sum()
+    return k
 
 
 def sharpenOpenCV(image):
