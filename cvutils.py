@@ -9,7 +9,7 @@ import cv2
 from skimage.morphology import skeletonize as skel_zhang
 from skimage.morphology import skeletonize_3d as skel_lee
 from skimage.filters import threshold_sauvola, threshold_niblack, unsharp_mask
-from skimage.measure import compare_psnr, compare_ssim
+# from skimage.measure import compare_psnr, compare_ssim
 from skimage.morphology import disk
 from skimage import transform as tf
 
@@ -292,6 +292,10 @@ def img_extend(img, shape):
     x[:img.shape[0], :img.shape[1]] = img
     return x
 
+
+def is_color(img):
+    return img.ndim == 3 and (img.shape[-1] != 1)
+    
 
 def to_gray(img):
     if img.ndim == 3:

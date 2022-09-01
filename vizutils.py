@@ -1,10 +1,45 @@
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
+import numpy as np
+
+# def implt(img, color=None, title=''):
+#     """Show image using plt."""
+#     plt.imshow(img, cmap=color)
+#     plt.title(title)
+#     plt.show()
+    
+#     return
 
 
-def implt(img, color=None, title=''):
+def is_color(img):
+    if img.ndim <=2:
+        return False
+
+    # img.ndim >=3
+    if img.shape[-1] == 1:
+        return False
+
+    return True
+
+
+def show_img(img, color='gray', is_bgr=False, title='', figsize=None):
     """Show image using plt."""
-    plt.imshow(img, cmap=color)
+    
+
+    if figsize:
+        if not isinstance(figsize, (tuple, list)):
+            figsize = (figsize, figsize)
+        plt.figure(figsize=figsize)
+
+    if is_color(img) and is_bgr:
+        img = img[...,::-1]
+
+    params = {'cmap':color}
+
+    if img.dtype == np.uint8:
+        params.update({'vmin': 0, 'vmax': 255})
+
+    plt.imshow(img, **params)
     plt.title(title)
     plt.show()
     
